@@ -34,11 +34,11 @@ jobs:
             artifact: tfire
           - os: windows-latest
             target: windows-x64
-            cmake: -DTFIRE_SDL_STATIC=OFF -A x64
+            cmake: -DTFIRE_SDL_STATIC=ON -A x64
             artifact: tfire.exe
           - os: windows-latest
             target: windows-arm64
-            cmake: -DTFIRE_SDL_STATIC=OFF -A ARM64
+            cmake: -DTFIRE_SDL_STATIC=ON -A ARM64
             artifact: tfire.exe
     runs-on: ${{ matrix.os || matrix.runs-on || 'ubuntu-latest' }}
     container: ${{ matrix.container }}
@@ -58,9 +58,12 @@ jobs:
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
         run: |
-          choco install cmake ninja sdl2 --no-progress
+          git clone https://github.com/microsoft/vcpkg.git C:/vcpkg
+          C:/vcpkg/bootstrap-vcpkg.bat
+          C:/vcpkg/vcpkg.exe install sdl2:x64-windows sdl2:arm64-windows --triplet x64-windows,arm64-windows
+          echo "VCPKG_ROOT=C:/vcpkg" >> $GITHUB_ENV
       - name: Configure
-        run: rm -rf build && cmake -B build -G Ninja ${{ matrix.cmake }}
+        run: rm -rf build && cmake -B build -G Ninja ${{ matrix.cmake }} -DCMAKE_TOOLCHAIN_FILE=$ENV:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
       - name: Build
         run: cmake --build build -j
       - name: Upload artifact
