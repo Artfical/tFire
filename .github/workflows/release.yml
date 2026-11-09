@@ -60,7 +60,7 @@ jobs:
         run: |
           choco install cmake ninja sdl2 --no-progress
       - name: Configure
-        run: cmake -B build -G Ninja ${{ matrix.cmake }}
+        run: rm -rf build && cmake -B build -G Ninja ${{ matrix.cmake }}
       - name: Build
         run: cmake --build build -j
       - name: Upload artifact
