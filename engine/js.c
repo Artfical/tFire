@@ -684,7 +684,11 @@ static void *jm_malloc(JSMallocState *s, size_t n) { (void)s; return malloc(n); 
 static void jm_free(JSMallocState *s, void *p) { (void)s; free(p); }
 static void *jm_realloc(JSMallocState *s, void *p, size_t n) { (void)s; return realloc(p, n); }
 #ifdef TFIRE_HOST
+#if defined(__linux__) || defined(__gnu_linux__)
 #include <malloc.h>
+#elif defined(__APPLE__)
+#include <malloc/malloc.h>
+#endif
 static size_t jm_usable(const void *p) { return malloc_usable_size((void *)p); }
 #else
 extern size_t tf_usable(const void *p);
