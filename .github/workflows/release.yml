@@ -29,27 +29,6 @@ jobs:
           path: build/tfire
           retention-days: 7
 
-  build-linux-arm64:
-    runs-on: ubuntu-latest
-    container: docker://arm64v8/ubuntu:22.04
-    steps:
-      - uses: actions/checkout@v4
-        with: { submodules: recursive }
-      - name: Install dependencies
-        run: |
-          apt-get update -q
-          apt-get install -y -q cmake ninja-build libsdl2-dev
-      - name: Configure
-        run: rm -rf build && cmake -B build -G Ninja -DTFIRE_SDL_STATIC=OFF
-      - name: Build
-        run: cmake --build build -j
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-arm64
-          path: build/tfire
-          retention-days: 7
-
   build-macos-arm64:
     runs-on: macos-latest
     steps:
@@ -109,31 +88,8 @@ jobs:
           path: build/tfire.exe
           retention-days: 7
 
-  build-windows-arm64:
-    runs-on: windows-latest
-    env:
-      VCPKG_ROOT: C:/vcpkg
-    steps:
-      - uses: actions/checkout@v4
-        with: { submodules: recursive }
-      - name: Install vcpkg
-        run: |
-          git clone https://github.com/microsoft/vcpkg.git C:/vcpkg
-          C:/vcpkg/bootstrap-vcpkg.bat
-          C:/vcpkg/vcpkg.exe install sdl2:arm64-windows --triplet arm64-windows
-      - name: Configure
-        run: rm -rf build && cmake -B build -G Ninja -DTFIRE_SDL_STATIC=ON -A ARM64 -DCMAKE_TOOLCHAIN_FILE=$ENV:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
-      - name: Build
-        run: cmake --build build -j
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-arm64
-          path: build/tfire.exe
-          retention-days: 7
-
   release:
-    needs: [build-linux, build-linux-arm64, build-macos-arm64, build-macos-x64, build-windows, build-windows-arm64]
+    needs: [build-linux, build-macos-arm64, build-macos-x64, build-windows]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
@@ -143,10 +99,7 @@ jobs:
         with:
           files: |
             linux-x64/tfire
-            linux-arm64/tfire
             macos-arm64/tfire
             macos-x64/tfire
             windows-x64/tfire.exe
-            windows-arm64/tfire.exe
           generate_release_notes: true
-
