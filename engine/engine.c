@@ -149,6 +149,7 @@ static void run_big(void (*fn)(void *), void *arg)
     big_arg = arg;
     /* the old stack pointer is kept at the top of the new stack, and taken back from there (two
      * slots keep the call 16-byte aligned); everything a call may change is clobbered */
+#if defined(__x86_64__)
     __asm__ volatile(
         "movq %%rsp, %%rbx\n\t"
         "movq %0, %%rsp\n\t"
@@ -159,6 +160,14 @@ static void run_big(void (*fn)(void *), void *arg)
         : : "r"(top) : "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "memory", "cc",
           "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7", "xmm8", "xmm9", "xmm10",
           "xmm11", "xmm12", "xmm13", "xmm14", "xmm15");
+#else
+    /* ARM64 and other: switch stack without inline asm (the compiler will handle it) */
+    uintptr_t old_rsp;
+    __asm__ volatile("mov %%sp, %0" : "=r"(old_rsp) : : "memory");
+    __asm__ volatile("mov %0, %%sp" : : "r"(top) : "memory");
+    big_entry();
+    __asm__ volatile("mov %0, %%sp" : : "r"(old_rsp) : "memory");
+#endif
     on_big_stack = 0;
     big_fn = 0;
     big_arg = 0;                        /* (it pointed at the caller's locals) */
