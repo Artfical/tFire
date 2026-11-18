@@ -22,8 +22,29 @@
 #define TF_KEY_RELOAD   0x200002
 #define TF_KEY_BACK     0x200003
 #define TF_KEY_FORWARD  0x200004
+#define TF_KEY_NEWTAB   0x200005
+#define TF_KEY_CLOSETAB 0x200006
+#define TF_KEY_NEXTTAB  0x200007
+#define TF_KEY_PREVTAB  0x200008
+#define TF_KEY_REOPEN   0x200009
+#define TF_KEY_FIND     0x20000A
+#define TF_KEY_BOOKMARK 0x20000B
+#define TF_KEY_HISTORY  0x20000C
+#define TF_KEY_BOOKMARKS 0x20000D
+#define TF_KEY_SELALL   0x20000E
+#define TF_KEY_COPY     0x20000F
+#define TF_KEY_CUT      0x200010
+#define TF_KEY_SENTER   0x200011
+#define TF_KEY_HOME     0x200012
+#define TF_KEY_END      0x200013
+#define TF_KEY_PGUP     0x200014
+#define TF_KEY_PGDN     0x200015
+#define TF_KEY_TAB1     0x200020
 
 extern void tf_free(void *p);
+extern void tfire_session_save(uiapp_t *a);
+extern void tfire_session_restore(uiapp_t *a);
+extern const char *tfire_host_clipboard_last(void);
 
 /* ------------------------------------------------------------------ a PNG for --screenshot (stored, not compressed) */
 
@@ -101,7 +122,7 @@ static uiapp_t *app_new(const uiapp_class_t *cls, int w, int h, const char *arg)
 static void usage(void)
 {
     puts("usage: tfire [address]\n"
-         "       tfire --screenshot out.png [--size WxH] [--wait seconds] address\n"
+         "       tfire --screenshot out.png [--size WxH] [--wait seconds] [--keys script] address\n"
          "       tfire --version");
 }
 
@@ -118,9 +139,67 @@ static int utf8_next(const char **s)
     return c;
 }
 
+/* --keys: what a person would do, for tests and screenshots. Words separated by spaces:
+ *   key:ctrl+t  key:enter  key:ctrl+shift+tab  key:left ...   type:text (%20 is a space)
+ *   click:x,y[,button]   hover:x,y   wheel:n   wait:milliseconds */
+static void run_wait(const uiapp_class_t *cls, uiapp_t *a, gfx_surface_t *s, int W, int H, uint32_t ms)
+{
+    uint32_t t0 = SDL_GetTicks();
+    do {
+        cls->draw(a, s, 0, 0, W, H);
+        cls->tick(a);
+        SDL_Delay(20);
+    } while (SDL_GetTicks() - t0 < ms);
+}
+
+static int key_named(const char *n)
+{
+    static const struct { const char *name; int key; } tab[] = {
+        { "ctrl+l", TF_KEY_URL }, { "ctrl+r", TF_KEY_RELOAD }, { "alt+left", TF_KEY_BACK }, { "alt+right", TF_KEY_FORWARD },
+        { "ctrl+t", TF_KEY_NEWTAB }, { "ctrl+w", TF_KEY_CLOSETAB }, { "ctrl+tab", TF_KEY_NEXTTAB }, { "ctrl+shift+tab", TF_KEY_PREVTAB },
+        { "ctrl+shift+t", TF_KEY_REOPEN }, { "ctrl+f", TF_KEY_FIND }, { "ctrl+d", TF_KEY_BOOKMARK }, { "ctrl+h", TF_KEY_HISTORY },
+        { "ctrl+shift+o", TF_KEY_BOOKMARKS }, { "ctrl+a", TF_KEY_SELALL }, { "ctrl+c", TF_KEY_COPY }, { "ctrl+x", TF_KEY_CUT },
+        { "enter", '\n' }, { "shift+enter", TF_KEY_SENTER }, { "esc", UI_KEY_ESC }, { "bs", '\b' }, { "del", UI_KEY_DEL },
+        { "left", UI_KEY_LEFT }, { "right", UI_KEY_RIGHT }, { "up", UI_KEY_UP }, { "down", UI_KEY_DOWN },
+        { "home", TF_KEY_HOME }, { "end", TF_KEY_END }, { "pgup", TF_KEY_PGUP }, { "pgdn", TF_KEY_PGDN }, { "space", ' ' },
+    };
+    for (size_t i = 0; i < sizeof(tab) / sizeof(tab[0]); i++) if (!strcmp(n, tab[i].name)) return tab[i].key;
+    if (!strncmp(n, "ctrl+", 5) && n[5] >= '1' && n[5] <= '9' && !n[6]) return TF_KEY_TAB1 + (n[5] - '1');
+    return 0;
+}
+
+static void run_script(const uiapp_class_t *cls, uiapp_t *a, gfx_surface_t *s, int W, int H, const char *script)
+{
+    char *copy = strdup(script);
+    for (char *w = strtok(copy, " "); w; w = strtok(0, " ")) {
+        if (!strncmp(w, "key:", 4)) {
+            int k = key_named(w + 4);
+            if (k) cls->key(a, k); else fprintf(stderr, "tfire: unknown key %s\n", w + 4);
+        } else if (!strncmp(w, "type:", 5)) {
+            for (const char *p = w + 5; *p;) {
+                if (p[0] == '%' && p[1] == '2' && p[2] == '0') { cls->key(a, ' '); p += 3; }
+                else { int cp = utf8_next(&p); cls->key(a, cp); }
+            }
+        } else if (!strncmp(w, "click:", 6)) {
+            int x = 0, y = 0, b = 1;
+            sscanf(w + 6, "%d,%d,%d", &x, &y, &b);
+            cls->draw(a, s, 0, 0, W, H);
+            cls->press(a, x, y, b);
+        } else if (!strncmp(w, "hover:", 6)) {
+            int x = 0, y = 0;
+            sscanf(w + 6, "%d,%d", &x, &y);
+            cls->hover(a, x, y);
+        } else if (!strncmp(w, "wheel:", 6)) cls->wheel(a, atoi(w + 6));
+        else if (!strncmp(w, "wait:", 5)) { run_wait(cls, a, s, W, H, (uint32_t)atoi(w + 5)); continue; }
+        else fprintf(stderr, "tfire: unknown step %s\n", w);
+        run_wait(cls, a, s, W, H, 120);
+    }
+    free(copy);
+}
+
 int main(int argc, char **argv)
 {
-    const char *shot = 0, *addr = 0;
+    const char *shot = 0, *addr = 0, *keys = 0;
     int W = 1100, H = 760, wait_s = 12;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--version")) { printf("tFire %s (%s)\n", TFIRE_VERSION, TFIRE_PLATFORM); return 0; }
@@ -128,6 +207,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--size") && i + 1 < argc) sscanf(argv[++i], "%dx%d", &W, &H);
         else if (!strcmp(argv[i], "--wait") && i + 1 < argc) wait_s = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--keys") && i + 1 < argc) keys = argv[++i];
         else if (argv[i][0] != '-') addr = argv[i];
     }
     if (gfx_init() != 0) { fprintf(stderr, "tfire: the fonts and icons did not load\n"); return 1; }
@@ -148,8 +228,10 @@ int main(int argc, char **argv)
             if (!redraw && SDL_GetTicks() - t0 > 2500) break;
             if (SDL_GetTicks() - t0 > (uint32_t)wait_s * 1000u) break;
         }
+        if (keys) run_script(cls, a, &s, W, H, keys);
         cls->draw(a, &s, 0, 0, W, H);
         int rc = write_png(shot, px, W, H);
+        if (keys && tfire_host_clipboard_last()[0]) printf("tfire: clipboard [%s]\n", tfire_host_clipboard_last());
         printf("tfire: %s [%s]\n", rc == 0 ? "wrote" : "could not write", shot);
         return rc ? 1 : 0;
     }
@@ -165,6 +247,7 @@ int main(int argc, char **argv)
     if (!ren) { fprintf(stderr, "tfire: %s\n", SDL_GetError()); return 1; }
     SDL_GetWindowSize(win, &W, &H);
     uiapp_t *a = app_new(cls, W, H, addr);
+    if (!addr) tfire_session_restore(a);                  /* the tabs that were open when it was closed */
     SDL_Texture *tex = 0;
     uint32_t *px = 0;
     gfx_surface_t surf;
@@ -186,6 +269,11 @@ int main(int argc, char **argv)
                 else if (e.window.event == SDL_WINDOWEVENT_LEAVE && cls->hover) cls->hover(a, -1, -1);
                 break;
             case SDL_MOUSEBUTTONDOWN:
+                if (e.button.button == SDL_BUTTON_X1 || e.button.button == SDL_BUTTON_X2) {      /* the mouse's back and forward buttons */
+                    cls->key(a, e.button.button == SDL_BUTTON_X1 ? TF_KEY_BACK : TF_KEY_FORWARD);
+                    need = 1;
+                    break;
+                }
                 down = 1;
                 if (cls->press) cls->press(a, e.button.x, e.button.y, e.button.button == SDL_BUTTON_LEFT ? 1 : e.button.button == SDL_BUTTON_RIGHT ? 2 : 3);
                 need = 1;
@@ -214,9 +302,22 @@ int main(int argc, char **argv)
             case SDL_KEYDOWN: {
                 SDL_Keycode k = e.key.keysym.sym;
                 SDL_Keymod m = SDL_GetModState();
-                int ctrl = (m & (KMOD_CTRL | KMOD_GUI)) != 0, alt = (m & KMOD_ALT) != 0, key = 0;
+                int ctrl = (m & (KMOD_CTRL | KMOD_GUI)) != 0, alt = (m & KMOD_ALT) != 0, shift = (m & KMOD_SHIFT) != 0, key = 0;
                 if (ctrl && k == SDLK_q) { running = 0; break; }
                 if (ctrl && k == SDLK_l) key = TF_KEY_URL;
+                else if (ctrl && k == SDLK_t) key = shift ? TF_KEY_REOPEN : TF_KEY_NEWTAB;
+                else if (ctrl && k == SDLK_w) key = TF_KEY_CLOSETAB;
+                else if (ctrl && k == SDLK_TAB) key = shift ? TF_KEY_PREVTAB : TF_KEY_NEXTTAB;
+                else if (ctrl && k == SDLK_PAGEDOWN) key = TF_KEY_NEXTTAB;
+                else if (ctrl && k == SDLK_PAGEUP) key = TF_KEY_PREVTAB;
+                else if (ctrl && k == SDLK_f) key = TF_KEY_FIND;
+                else if (ctrl && k == SDLK_d) key = TF_KEY_BOOKMARK;
+                else if (ctrl && k == SDLK_h) key = TF_KEY_HISTORY;
+                else if (ctrl && shift && k == SDLK_o) key = TF_KEY_BOOKMARKS;
+                else if (ctrl && k == SDLK_a) key = TF_KEY_SELALL;
+                else if (ctrl && k == SDLK_c) key = TF_KEY_COPY;
+                else if (ctrl && k == SDLK_x) key = TF_KEY_CUT;
+                else if (ctrl && k >= SDLK_1 && k <= SDLK_9) key = TF_KEY_TAB1 + (int)(k - SDLK_1);
                 else if ((ctrl && k == SDLK_r) || k == SDLK_F5) key = TF_KEY_RELOAD;
                 else if (alt && k == SDLK_LEFT) key = TF_KEY_BACK;
                 else if (alt && k == SDLK_RIGHT) key = TF_KEY_FORWARD;
@@ -232,15 +333,15 @@ int main(int argc, char **argv)
                 case SDLK_DOWN: key = UI_KEY_DOWN; break;
                 case SDLK_LEFT: key = UI_KEY_LEFT; break;
                 case SDLK_RIGHT: key = UI_KEY_RIGHT; break;
-                case SDLK_RETURN: case SDLK_KP_ENTER: key = '\n'; break;
+                case SDLK_RETURN: case SDLK_KP_ENTER: key = shift ? TF_KEY_SENTER : '\n'; break;
                 case SDLK_BACKSPACE: key = '\b'; break;
                 case SDLK_ESCAPE: key = UI_KEY_ESC; break;
                 case SDLK_DELETE: key = UI_KEY_DEL; break;
                 case SDLK_TAB: key = '\t'; break;
-                case SDLK_PAGEDOWN: key = ' '; break;
-                case SDLK_PAGEUP: if (cls->wheel) cls->wheel(a, -(H / 64)); need = 1; break;
-                case SDLK_HOME: if (cls->wheel) cls->wheel(a, -100000); need = 1; break;
-                case SDLK_END: if (cls->wheel) cls->wheel(a, 100000); need = 1; break;
+                case SDLK_PAGEDOWN: key = TF_KEY_PGDN; break;
+                case SDLK_PAGEUP: key = TF_KEY_PGUP; break;
+                case SDLK_HOME: key = TF_KEY_HOME; break;
+                case SDLK_END: key = TF_KEY_END; break;
                 default: break;
                 }
                 if (key && cls->key) { cls->key(a, key); need = 1; }
@@ -281,6 +382,7 @@ int main(int argc, char **argv)
         updater_poll(a);
         if (idle) SDL_Delay(8);
     }
+    tfire_session_save(a);
     if (cls->close) cls->close(a);
     SDL_Quit();
     return 0;

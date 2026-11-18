@@ -127,6 +127,9 @@ void  uihost_fetch_free(void *h);
  * bigger. Pictures too big to decode safely are refused. 0 = ok. */
 int   uihost_image_decode(const uint8_t *data, uint32_t len, int max_w, int max_h, uint8_t **rgba, int *w, int *h);
 
+/* the system's clipboard: text copied by the app (pasting reaches an app as typed keys) */
+void uihost_clipboard_set(const char *text);
+
 /* closes the window an app (a uiapp_t) is in, like its red button */
 void uihost_close_window(void *app);
 int  uihost_disk_job(int op, const char *dev, const char *fs, const char *name);

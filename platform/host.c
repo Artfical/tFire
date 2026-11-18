@@ -181,6 +181,14 @@ void uihost_open(const char *app_id, const char *path)
 
 int uihost_set_wallpaper(const char *path) { (void)path; return -1; }
 
+static char clip_last[2048];
+const char *tfire_host_clipboard_last(void) { return clip_last; }
+void uihost_clipboard_set(const char *text)
+{
+    snprintf(clip_last, sizeof(clip_last), "%s", text ? text : "");
+    if (SDL_WasInit(SDL_INIT_VIDEO)) SDL_SetClipboardText(clip_last);
+}
+
 int uihost_notify(const char *app, const char *icon, const char *title, const char *body, const char *act1, const char *act2)
 {
     (void)app; (void)icon; (void)act1; (void)act2;
